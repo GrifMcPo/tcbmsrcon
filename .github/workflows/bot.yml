@@ -2,8 +2,8 @@ name: Run Telegram Bot
 
 on:
   schedule:
-    - cron: '*/5 * * * *'   # Каждые 5 минут
-  workflow_dispatch:         # Чтобы можно было запустить вручную
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -23,4 +23,4 @@ jobs:
 
       - name: Run bot
         run: |
-          python bot.py
+          python main.py   # <--- ЭТО ГЛАВНОЕ!
