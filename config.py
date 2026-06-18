@@ -13,10 +13,10 @@ class Configuration:
 
     @classmethod
     def from_env(cls):
-        kwargs = {'token': 'YOUR_TELEGRAM_BOT_TOKEN',
-                  'admins_list': 'ADMINS_ID'.split('_'),
-                  'rcon_host': 'IP_MC_SERVER',
-                  'rcon_pass': 'PASS_RCON'}
+        kwargs = {'token': '8911166276:AAFyf2kdVbRCRi81Um_-f5lrfaRCBuzX87s',
+                  'admins_list': '8308522569'.split('_'),
+                  'rcon_host': 'f1.rustix.me:25575',
+                  'rcon_pass': '__871410__grifmcproRCON'}
 
         if os.environ.get('RCON_PORT'):
             kwargs['rcon_port'] = os.environ['RCON_PORT']
