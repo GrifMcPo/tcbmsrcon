@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install aiogram==2.25.1 mcrcon
+          pip install aiogram mcrcon
 
       - name: Run bot
         run: |
