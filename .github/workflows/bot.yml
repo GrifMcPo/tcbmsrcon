@@ -1,26 +1,107 @@
-name: Run Telegram Bot
+import asyncio
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import Message
+import mcrcon
+import config  # Импортируем настройки из config.py
 
-on:
-  schedule:
-    - cron: '*/15 * * * *'  # Каждые 15 минут
-  workflow_dispatch:
+# ===== БЕРЁМ НАСТРОЙКИ ИЗ CONFIG.PY =====
+TOKEN = config.kwargs['token']
+ADMIN_ID = int(config.kwargs['admins_list'][0])  # Берём первый ID из списка
+RCON_HOST = config.kwargs['rcon_host'].split(':')[0]
+RCON_PORT = int(config.kwargs['rcon_host'].split(':')[1]) if ':' in config.kwargs['rcon_host'] else 25575
+RCON_PASS = config.kwargs['rcon_pass']
+# =========================================
 
-jobs:
-  run-bot:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+def send_rcon(command: str) -> str:
+    try:
+        with mcrcon.MCRcon(RCON_HOST, RCON_PASS, port=RCON_PORT) as m:
+            resp = m.command(command)
+            return resp if resp else "✅ Выполнено"
+    except Exception as e:
+        return f"❌ Ошибка: {e}"
 
-      - name: Install deps
-        run: |
-         pip install mcrcon aiogram
+@dp.message(Command("start"))
+async def start_cmd(message: Message):
+    await message.answer(
+        "🤖 Бот для Minecraft\n"
+        "/online - игроки\n"
+        "/say текст - в чат\n"
+        "/ban ник - бан\n"
+        "/unban ник - разбан\n"
+        "/cmd команда - любая команда"
+    )
 
-      - name: Run bot
-        run: |
-          python main.py
+@dp.message(Command("online"))
+async def online_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет прав")
+        return
+    resp = send_rcon("list")
+    await message.answer(f"📊 {resp}")
+
+@dp.message(Command("say"))
+async def say_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет прав")
+        return
+    text = message.text.replace("/say", "", 1).strip()
+    if not text:
+        await message.answer("❌ /say Привет")
+        return
+    resp = send_rcon(f"say {text}")
+    await message.answer(f"💬 {resp}")
+
+@dp.message(Command("ban"))
+async def ban_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет прав")
+        return
+    nick = message.text.replace("/ban", "", 1).strip()
+    if not nick:
+        await message.answer("❌ /ban Player")
+        return
+    resp = send_rcon(f"ban {nick}")
+    await message.answer(f"🔨 {resp}")
+
+@dp.message(Command("unban"))
+async def unban_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет прав")
+        return
+    nick = message.text.replace("/unban", "", 1).strip()
+    if not nick:
+        await message.answer("❌ /unban Player")
+        return
+    resp = send_rcon(f"pardon {nick}")
+    await message.answer(f"🔓 {resp}")
+
+@dp.message(Command("cmd"))
+async def cmd_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Нет прав")
+        return
+    cmd = message.text.replace("/cmd", "", 1).strip()
+    if not cmd:
+        await message.answer("❌ /cmd say Hello")
+        return
+    resp = send_rcon(cmd)
+    await message.answer(f"⚙️ {resp}")
+
+@dp.message()
+async def fallback(message: Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("❓ /start для списка команд")
+    else:
+        await message.answer("⛔ Доступ запрещен")
+
+async def main():
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
