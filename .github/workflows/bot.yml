@@ -19,7 +19,7 @@ jobs:
 
       - name: Install deps
         run: |
-          pip install mcrcon python-telegram-bot
+         pip install mcrcon aiogram
 
       - name: Run bot
         run: |
