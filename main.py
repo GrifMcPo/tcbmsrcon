@@ -1,255 +1,122 @@
-from aiogram.dispatcher.filters.state import StatesGroup, State
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.dispatcher.filters import Text
-from aiogram.dispatcher import FSMContext
-from config import Configuration
-from mcrcon import MCRcon
+import asyncio
 import logging
-import locale
-import helper
+from aiogram import Bot, Dispatcher
+from aiogram.filters import Command
+from aiogram.types import Message
+import mcrcon
+import config
 
-config = Configuration.from_env()
+# ===== НАСТРОЙКИ ИЗ CONFIG.PY =====
+TOKEN = config.kwargs['token']
+ADMIN_ID = int(config.kwargs['admins_list'][0])
+RCON_HOST = config.kwargs['rcon_host'].split(':')[0]
+RCON_PORT = int(config.kwargs['rcon_host'].split(':')[1]) if ':' in config.kwargs['rcon_host'] else 25575
+RCON_PASS = config.kwargs['rcon_pass']
+# ===================================
 
-bot = Bot(config.token, parse_mode='html')
-dp = Dispatcher(bot, storage=MemoryStorage())
+logging.basicConfig(level=logging.INFO)
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
 
-logging.basicConfig(level=config.log_level)
-logger = logging.getLogger('bot')
-logger.setLevel(config.log_level)
+def send_rcon(command: str) -> str:
+    """Отправляет команду на сервер через RCON"""
+    try:
+        with mcrcon.MCRcon(RCON_HOST, RCON_PASS, port=RCON_PORT) as m:
+            resp = m.command(command)
+            return resp if resp else "✅ Команда выполнена"
+    except Exception as e:
+        return f"❌ Ошибка RCON: {e}"
 
+# ===== КОМАНДЫ =====
 
-class set_donate(StatesGroup):
-    wait_nick = State()
-    wait_donate_n = State()
-    wait_ban = State()
-    wait_unban = State()
-    wait_reload = State()
-    wait_money = State()
-    wait_nick_to_pay = State()
+@dp.message(Command("start"))
+async def start_cmd(message: Message):
+    await message.answer(
+        "🤖 **Бот управления Minecraft сервером**\n\n"
+        "📋 **Команды:**\n"
+        "/online — список игроков онлайн\n"
+        "/say <текст> — сообщение в чат сервера\n"
+        "/ban <ник> — забанить игрока\n"
+        "/unban <ник> — разбанить игрока\n"
+        "/cmd <команда> — выполнить любую консольную команду\n"
+        "/help — показать это сообщение",
+        parse_mode="Markdown"
+    )
 
-# -----------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------- START --------------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
+@dp.message(Command("help"))
+async def help_cmd(message: Message):
+    await start_cmd(message)
 
+@dp.message(Command("online"))
+async def online_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав для этой команды.")
+        return
+    resp = send_rcon("list")
+    await message.answer(f"📊 **Игроки онлайн:**\n`{resp}`", parse_mode="Markdown")
 
-@dp.message_handler(commands='start')
-async def start(message: types.Message):
-    if message.from_user.id in config.admins_list:
-        text = locale.start_message_ok.format(message.from_user.first_name)
-        return await message.answer(text, reply_markup=helper.menu_kb)
-    await message.answer(locale.start_message_err)
+@dp.message(Command("say"))
+async def say_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав для этой команды.")
+        return
+    text = message.text.replace("/say", "", 1).strip()
+    if not text:
+        await message.answer("❌ Напишите: `/say Привет всем!`", parse_mode="Markdown")
+        return
+    resp = send_rcon(f"say {text}")
+    await message.answer(f"💬 **Сообщение отправлено:**\n`{resp}`", parse_mode="Markdown")
 
-# -----------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------- DONATE--------------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
+@dp.message(Command("ban"))
+async def ban_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав для этой команды.")
+        return
+    nick = message.text.replace("/ban", "", 1).strip()
+    if not nick:
+        await message.answer("❌ Укажите ник: `/ban Player`", parse_mode="Markdown")
+        return
+    resp = send_rcon(f"ban {nick}")
+    await message.answer(f"🔨 **Игрок {nick} забанен:**\n`{resp}`", parse_mode="Markdown")
 
+@dp.message(Command("unban"))
+async def unban_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав для этой команды.")
+        return
+    nick = message.text.replace("/unban", "", 1).strip()
+    if not nick:
+        await message.answer("❌ Укажите ник: `/unban Player`", parse_mode="Markdown")
+        return
+    resp = send_rcon(f"pardon {nick}")
+    await message.answer(f"🔓 **Игрок {nick} разбанен:**\n`{resp}`", parse_mode="Markdown")
 
-@dp.message_handler(Text(equals=locale.get_donate_btn))
-async def with_puree(message: types.Message, state: FSMContext):
-    if message.from_user.id in config.admins_list:
-        await message.answer(text=locale.input_nick, reply_markup=helper.ext_kb)
-        await state.set_state(set_donate.wait_nick)
+@dp.message(Command("cmd"))
+async def cmd_cmd(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У вас нет прав для этой команды.")
+        return
+    command = message.text.replace("/cmd", "", 1).strip()
+    if not command:
+        await message.answer("❌ Укажите команду: `/cmd say Hello`", parse_mode="Markdown")
+        return
+    resp = send_rcon(command)
+    await message.answer(f"⚙️ **Команда выполнена:**\n`{resp}`", parse_mode="Markdown")
 
+# ===== ОСТАЛЬНЫЕ СООБЩЕНИЯ =====
 
-@dp.message_handler(state=set_donate.wait_nick)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
+@dp.message()
+async def fallback(message: Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("❓ Неизвестная команда. Используйте /start для списка.")
     else:
-        helper.temp_nick = message.text
-        helper.kbd_gen()
-        await message.answer(text=locale.choose_donate, reply_markup=helper.dn_kb)
-        await state.set_state(set_donate.wait_donate_n)
+        await message.answer("⛔ У вас нет доступа к этому боту.")
 
+# ===== ЗАПУСК =====
 
-@dp.message_handler(state=set_donate.wait_donate_n)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    else:
-        helper.temp_donate = message.text
-        donate = helper.definition_butt()
-        if donate == "err":
-            await message.answer(text=locale.err_choose_donate, reply_markup=helper.dn_kb)
-            await state.set_state(set_donate.wait_donate_n)
-        else:
-            command = "lp user " + helper.temp_nick + " parent set " + donate
-            with MCRcon(config.rcon_host, config.rcon_pass, config.rcon_port) as mcr:
-                resp = mcr.command(command)
-                logger.info(resp)
-            await message.answer(text=locale.success, reply_markup=helper.menu_kb)
-            await state.finish()
+async def main():
+    logging.info("✅ Бот запущен и готов к работе!")
+    await dp.start_polling(bot)
 
-# -----------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------- UPD BALLANCE -------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-
-@dp.message_handler(Text(equals=locale.issuance_currency_btn))
-async def with_puree(message: types.Message, state: FSMContext):
-    if message.from_user.id in config.admins_list:
-        await message.answer(text=locale.input_nick, reply_markup=helper.ext_kb)
-        await state.set_state(set_donate.wait_nick_to_pay)
-
-
-@dp.message_handler(state=set_donate.wait_nick_to_pay)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    else:
-        helper.temp_nick = message.text
-        await message.answer(text=locale.input_amount, reply_markup=helper.ext_kb)
-        await state.set_state(set_donate.wait_money)
-
-
-@dp.message_handler(state=set_donate.wait_money)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    else:
-        if message.text.isnumeric():
-            command = "eco give " + helper.temp_nick + " " + message.text
-            with MCRcon(
-                    config.rcon_host,
-                    config.rcon_pass,
-                    config.rcon_port
-            ) as mcr:
-                resp = mcr.command(command)
-                logger.info(resp)
-            await message.answer(text=locale.success + message.text + " $", reply_markup=helper.menu_kb)
-            await state.finish()
-        else:
-            await message.answer(text=locale.err_input_amount, reply_markup=helper.ext_kb)
-            await state.set_state(set_donate.wait_money)
-
-# -----------------------------------------------------------------------------------------------------------------------------------
-# --------------------------------------------------------  BAN  --------------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-
-@dp.message_handler(Text(equals=locale.ban_btn))
-async def with_puree(message: types.Message, state: FSMContext):
-    if message.from_user.id in config.admins_list:
-        await message.answer(text=locale.input_nick_ban, reply_markup=helper.ext_kb)
-        await state.set_state(set_donate.wait_ban)
-
-
-@dp.message_handler(state=set_donate.wait_ban)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    else:
-        command = "ban " + message.text
-        with MCRcon(
-                config.rcon_host,
-                config.rcon_pass,
-                config.rcon_port
-        ) as mcr:
-            resp = mcr.command(command)
-            logger.info(resp)
-        await message.answer(text=locale.ban_ok, reply_markup=helper.menu_kb)
-        await state.finish()
-
-# -----------------------------------------------------------------------------------------------------------------------------------
-# ------------------------------------------------------- PARDON --------------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-
-@dp.message_handler(Text(equals=locale.pardon_btn))
-async def with_puree(message: types.Message, state: FSMContext):
-    if message.from_user.id in config.admins_list:
-        await message.answer(text=locale.input_nick, reply_markup=helper.ext_kb)
-        await state.set_state(set_donate.wait_unban)
-
-
-@dp.message_handler(state=set_donate.wait_unban)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    else:
-        command = "pardon " + message.text
-        with MCRcon(
-                config.rcon_host,
-                config.rcon_pass,
-                config.rcon_port
-        ) as mcr:
-            resp = mcr.command(command)
-            logger.info(resp)
-        await message.answer(text=locale.pardon_ok, reply_markup=helper.menu_kb)
-        await state.finish()
-
-# -----------------------------------------------------------------------------------------------------------------------------------
-# -------------------------------------------------------- RESTART --------------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-
-@dp.message_handler(Text(equals=locale.restart_btn))
-async def with_puree(message: types.Message, state: FSMContext):
-    if message.from_user.id in config.admins_list:
-        command = "reload"
-        with MCRcon(
-                config.rcon_host,
-                config.rcon_pass,
-                config.rcon_port
-        ) as mcr:
-            resp = mcr.command(command)
-            logger.info(resp)
-        await message.answer(text=locale.rst_warning, reply_markup=helper.rld_kb)
-        await state.set_state(set_donate.wait_reload)
-
-
-@dp.message_handler(state=set_donate.wait_reload)
-async def amount_set(message: types.Message, state: FSMContext):
-    if message.text == locale.cancel_rst_btn:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-    elif message.text == locale.run_rst_btn:
-        command = "reload confirm"
-        await message.answer(text=locale.rst_ok, reply_markup=helper.menu_kb)
-        await state.finish()
-        with MCRcon(config.rcon_host, config.rcon_pass, config.rcon_port) as mcr:
-            resp = mcr.command(command)
-            logger.info(resp)
-    else:
-        await state.finish()
-        await message.answer(text=locale.cancel_ok, reply_markup=helper.menu_kb)
-
-# -----------------------------------------------------------------------------------------------------------------------------------
-# --------------------------------------------------- OTHER COMMAND -----------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-
-@dp.message_handler()
-async def text(message: types.Message):
-    if message.from_user.id in config.admins_list:
-        bot = await message.bot.get_me()
-        command = message.text.replace('@ ' + bot.username, '')
-        command = message.text.replace('@' + bot.username, '')
-        if command[0] == '/':
-            command = command[1:]
-        with MCRcon(
-                config.rcon_host,
-                config.rcon_pass,
-                config.rcon_port
-        ) as mcr:
-            resp = mcr.command(command)
-            logger.info(resp)
-            i = 0
-            while i < len(helper.rm_smb):
-                resp = resp.replace(helper.rm_smb[i], ' ')
-                i += 1
-            await message.reply('<code>%s</code>' % resp)
-
-# -----------------------------------------------------------------------------------------------------------------------------------
-# ---------------------------------------------------  POLLING MODE -----------------------------------------------------------------
-# -----------------------------------------------------------------------------------------------------------------------------------
-
-if __name__ == '__main__':
-    executor.start_polling(dp)
+if __name__ == "__main__":
+    asyncio.run(main())
